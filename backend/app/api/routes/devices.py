@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.device import DeviceBase, DeviceFull, DeviceStatus
 from app.services.source_service import source_service
+from app.services.scheduler_service import scheduler_service
 from app.services.git_service import git_service
 from app.services.backup_job_service import backup_job_service
 from app.core.config import get_settings
@@ -136,6 +137,8 @@ async def reload_devices() -> dict:
     """Reload devices from source."""
     source_service.invalidate_cache()
     devices = await source_service.get_all_devices()
+    scheduler_service.stop_scheduler()
+    scheduler_service.start_scheduler(devices)
 
     return {
         "message": "Devices reloaded successfully",
