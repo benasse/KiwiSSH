@@ -1,0 +1,66 @@
+### Cisco SMB Vendor Configuration
+## Cisco Small Business switches which require a second login inside the SSH shell
+
+vendor:
+  id: "cisco_smb3"
+  name: "Cisco SMB (CLI login)"
+  description: "Cisco Small Business 300, 500, and ESW2 series switches with an interactive CLI login"
+
+session:
+  comment_prefix: "! "
+  prompt: '^\r?([\w.@()-]+[#>]\s?)$'
+  login:
+    - expect: 'User Name:'
+      send: '{{ username }}'
+    - expect: 'Password:'
+      send: '{{ password }}'
+      secret: true
+  pagination:
+    enabled: true
+    patterns:
+      - pattern: '^.*Your password has exceeded the maximum lifetime.*$'
+        response: "N"
+
+commands:
+  pre_backup:
+    - command: "enable"
+      then: ["{{ enable_password }}"]
+      when: "enable_password"
+    - command: "terminal datadump"
+    - command: "terminal length 0"
+    - command: "terminal width 0"
+
+  backup:
+    - command: "show version"
+      metadata: true
+    - command: "show bootvar"
+      metadata: true
+    - command: "show running-config"
+      show_command_in_config: true
+
+  post_backup:
+    - command: "exit"
+    - command: "exit"
+
+processing:
+  redaction:
+    enabled: false
+    patterns:
+      - search: '^(snmp-server community) \S+ (.*)'
+        replacement: '\1 <configuration removed> \2'
+      - search: '^(username \S+ privilege \d+) \S+ (.*)'
+        replacement: '\1 <secret hidden> \2'
+      - search: '^(username \S+ password encrypted) \S+(.*)'
+        replacement: '\1 <secret hidden> \2'
+      - search: '^(enable password level \d+ encrypted) \S+'
+        replacement: '\1 <secret hidden>'
+      - search: '^(encrypted radius-server key).*(.*)'
+        replacement: '\1 <configuration removed> \2'
+      - search: '^(encrypted radius-server host .+ key) \S+(.*)'
+        replacement: '\1 <secret hidden> \2'
+      - search: '^(encrypted tacacs-server key).*(.*)'
+        replacement: '\1 <secret hidden> \2'
+      - search: '^(encrypted tacacs-server host .+ key) \S+(.*)'
+        replacement: '\1 <secret hidden> \2'
+      - search: '^(encrypted sntp authentication-key \d+ md5) .*'
+        replacement: '\1 <secret hidden>'

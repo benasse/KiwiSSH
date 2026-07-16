@@ -418,6 +418,63 @@ class SSHService:
             ### Timeout tracks inactivity, not total command runtime
             inactivity_deadline = loop.time() + timeout_seconds
 
+    async def _run_session_login(
+        self,
+        process: asyncssh.SSHClientProcess,
+        login_steps: list[dict[str, Any]],
+        *,
+        username: str,
+        password: str | None,
+        timeout: int,
+        trace: SSHTraceSession | None,
+    ) -> None:
+        """Complete an optional vendor-defined login inside the SSH shell."""
+        values = {
+            "{{ username }}": username,
+            "{{ password }}": password or "",
+        }
+        for index, step in enumerate(login_steps, start=1):
+            expect = str(step.get("expect") or "").strip()
+            send_template = str(step.get("send") or "")
+            if not expect:
+                raise RuntimeError("Session login step requires a non-empty 'expect' pattern")
+            try:
+                expect_pattern = re.compile(expect)
+            except re.error as ex:
+                raise RuntimeError(f"Invalid session login expect pattern '{expect}': {ex}") from ex
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + max(1, int(timeout))
+            buffer = ""
+            while not expect_pattern.search(buffer):
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Session login timed out waiting for pattern '{expect}'"
+                    )
+                try:
+                    chunk = await asyncio.wait_for(
+                        process.stdout.read(READ_CHUNK_SIZE),
+                        timeout=min(remaining, READ_POLL_INTERVAL_SECONDS),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if chunk == "":
+                    raise RuntimeError(
+                        f"SSH shell closed while waiting for session login pattern '{expect}'"
+                    )
+                if trace is not None:
+                    trace.raw_received(chunk, context=f"session_login:{index}")
+                buffer += chunk
+
+            send_value = values.get(send_template.strip(), send_template)
+            secret = bool(step.get("secret", send_template.strip() == "{{ password }}"))
+            payload = send_value if send_value.endswith(("\n", "\r")) else f"{send_value}\n"
+            if trace is not None:
+                trace.event("SESSION_LOGIN_MATCHED", step=index, expect=expect)
+                trace.raw_sent(payload, context=f"session_login:{index}", secret=secret)
+            process.stdin.write(payload)
+
     @staticmethod
     async def _read_trailing_output(
         stream: asyncssh.SSHReader,
@@ -992,6 +1049,8 @@ class SSHService:
         connection: asyncssh.SSHClientConnection,
         vendor_id: str,
         default_timeout: int,
+        username: str,
+        password: str | None,
         enable_password: str | None,
         trace: SSHTraceSession | None = None,
     ) -> tuple[str, str | None]:
@@ -1009,6 +1068,9 @@ class SSHService:
         include_metadata_in_config = bool(session_config.get("include_metadata_in_config", False))
         prompt_patterns = self._get_prompt_patterns(vendor_id)
         pagination_rules = self._get_pagination_settings(vendor_id)
+        login_steps = session_config.get("login", [])
+        if login_steps and not isinstance(login_steps, list):
+            raise RuntimeError("Vendor session.login must be a list")
 
         ### Get processing rules for the vendor
         processing_rules = vendor_service.get_processing_rules(vendor_id)
@@ -1022,7 +1084,19 @@ class SSHService:
         process = await connection.create_process(term_type="vt100", encoding="utf-8")
         captured_output: list[dict[str, Any]] = []
         try:
+            if login_steps:
+                await self._run_session_login(
+                    process,
+                    login_steps,
+                    username=username,
+                    password=password,
+                    timeout=default_timeout,
+                    trace=trace,
+                )
+
             ### Write an initial newline to ensure we get a prompt before starting commands
+            if trace is not None:
+                trace.raw_sent("\n", context="initial_prompt")
             process.stdin.write("\n")
 
             ### Wait for the initial prompt to ensure the shell is ready before sending commands
@@ -1304,6 +1378,8 @@ class SSHService:
                     connection=connection,
                     vendor_id=vendor_id,
                     default_timeout=timeout_seconds,
+                    username=device_username,
+                    password=device_password,
                     enable_password=enable_password,
                     trace=trace,
                 )
