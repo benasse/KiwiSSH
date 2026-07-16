@@ -117,6 +117,10 @@ class SchedulerService:
         Args:
             devices: List of all available devices
         """
+        # Refresh settings after startup cache invalidation so source-provided
+        # device overrides (including credentials) are available to schedules.
+        self.settings = get_settings()
+
         if self.scheduler is not None:
             logger.warning("Scheduler is already running")
             return

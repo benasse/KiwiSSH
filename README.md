@@ -234,6 +234,10 @@ Full available options:
 | `app.threads` | The maximum number of concurrent SSH sessions for backups. | No | `20` |
 | `app.timeout` | The global connection timeout in seconds. This can be overridden for specific groups or nodes. | No | `30` |
 | `app.retry` | The global retry count, which defines how many additional attempts should be made after the first failed attempt. This can also be overridden for specific groups or nodes. | No | `3` |
+| `app.ssh_trace.enabled` | Write a redacted diagnostic file for each SSH attempt. | No | `false` |
+| `app.ssh_trace.directory` | Directory where SSH trace files are written. | No | `/config/debug` |
+| `app.ssh_trace.capture_output` | Include received terminal output in traces. This can contain device configuration data. Known credentials are redacted. | No | `false` |
+| `app.ssh_trace.max_output_chars` | Maximum received output characters stored per trace event. | No | `4000` |
 | `app.protocol` | Default protocol for device connections (`ssh` or `telnet`). | No | `ssh` |
 | `app.api.host` | The host on which the API server will run. Should be set to 0.0.0.0 when running in Docker. | No | `127.0.0.1` |
 | `app.api.port` | The port on which the API server will run. | No | `8000` |
@@ -243,6 +247,33 @@ Full available options:
 | `app.retention.enabled` | If set to true, log retention policies will be enforced. Will run every day at 03:00 UTC. | No | `false` |
 | `app.retention.max_age_days` | Maximum age of backup job logs in days. Logs older than this will be deleted. | No | `90` |
 | `app.retention.max_rows` | Maximum number of backup job logs to keep. Oldest logs will be deleted when this limit is exceeded. | No | `100000` |
+
+### SSH session tracing
+
+Enable per-attempt SSH traces when a device connection or vendor command sequence is difficult to diagnose:
+
+```yaml
+app:
+  debug: true
+  ssh_trace:
+    enabled: true
+    directory: "/config/debug"
+    capture_output: true
+    max_output_chars: 4000
+```
+
+Each attempt creates a file such as:
+
+```text
+/config/debug/device1-20260716T183422.123456Z-attempt1.log
+```
+
+Trace files record connection parameters, selected SSH algorithms, connection outcome, prompt detection, command phases, interactive steps, timeouts, and errors. Passwords and enable passwords known to KiwiSSH are replaced with `[REDACTED]`.
+
+> [!WARNING]
+> With `capture_output: true`, trace files may contain device configuration output or other sensitive terminal text which KiwiSSH cannot identify as a credential. Enable it only while troubleshooting, protect the trace directory, and delete traces afterwards.
+
+For Docker deployments, `KIWISSH_SSH_TRACE_DIR` mounts the host trace directory at `/config/debug`.
 
 ### application_database
 

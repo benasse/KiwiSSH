@@ -137,6 +137,22 @@ class RetentionConfig(BaseModel):
 
 
 ### Application configuration models
+class SSHTraceConfig(BaseModel):
+    """Per-attempt SSH diagnostic trace configuration."""
+
+    enabled: bool = False
+    directory: str = "/config/debug"
+    capture_output: bool = False
+    max_output_chars: int = Field(default=4000, ge=256, le=100000)
+
+    @field_validator("directory", mode="before")
+    @classmethod
+    def validate_directory(cls, value: str | None) -> str:
+        text = "" if value is None else str(value).strip()
+        if not text:
+            raise ValueError("app.ssh_trace.directory must be a non-empty path")
+        return os.path.expanduser(text)
+
 class AppConfig(BaseModel):
     """Application-level settings."""
     debug: bool = False
@@ -147,6 +163,7 @@ class AppConfig(BaseModel):
     api: ApiConfig = Field(default_factory=ApiConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    ssh_trace: SSHTraceConfig = Field(default_factory=SSHTraceConfig)
 
     @field_validator("protocol", mode="before")
     @classmethod
@@ -774,6 +791,8 @@ class Settings(BaseSettings):
 
             ### app
             self.app = AppConfig(**file_content.get("app", {}))
+
+            self.app.ssh_trace.directory = self._resolve_config_relative_path(self.app.ssh_trace.directory)
 
             ### groups
             groups_data = file_content.get("groups", {})

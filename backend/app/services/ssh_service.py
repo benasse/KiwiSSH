@@ -12,6 +12,7 @@ from app.core import get_settings
 from app.models.device import DeviceBase
 from app.services.vendor_service import vendor_service
 from app.services.local_ssh_simulator import local_ssh_simulator
+from app.services.ssh_trace_service import SSHTraceSession
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +291,8 @@ class SSHService:
         *,
         stdin: Any | None = None,
         pagination_rules: list[PaginationRule] | None = None,
+        trace: SSHTraceSession | None = None,
+        trace_context: str = "prompt_wait",
     ) -> str:
         """Read stream until one of the patterns appears or timeout is reached."""
         loop = asyncio.get_running_loop()
@@ -330,6 +333,9 @@ class SSHService:
                     if trailing:
                         buffer += trailing
                         continue
+                    if trace is not None:
+                        trace.received(buffer, context=trace_context)
+                        trace.event("PROMPT_MATCHED", context=trace_context, line=tail_lines[-1])
                     return buffer
 
                 ### Handle pagination prompts by sending the response for the matching pagination rule
@@ -341,6 +347,8 @@ class SSHService:
                     )
 
                 if matched_pagination_response is not None:
+                    if trace is not None:
+                        trace.event("PAGINATION_MATCHED", context=trace_context, line=tail_lines[-1])
                     if stdin is not None:
                         stdin.write(matched_pagination_response)
 
@@ -371,6 +379,9 @@ class SSHService:
                     "Timed out waiting for prompt. Last non-empty output line: %r",
                     ANSI_ESCAPE_RE.sub("", last_non_empty)[-200:],
                 )
+                if trace is not None:
+                    trace.received(buffer, context=trace_context)
+                    trace.event("PROMPT_TIMEOUT", context=trace_context, last_line=last_non_empty)
                 raise asyncio.TimeoutError("Timed out waiting for prompt")
 
             ### Read the next chunk of output with a short timeout to allow for prompt detection
@@ -384,6 +395,9 @@ class SSHService:
                 continue
 
             if chunk == "":
+                if trace is not None:
+                    trace.received(buffer, context=trace_context)
+                    trace.event("STREAM_EOF", context=trace_context)
                 return buffer
 
             ### Append the new chunk to the buffer and continue checking for patterns
@@ -440,6 +454,7 @@ class SSHService:
         command: str,
         prompt_patterns: list[re.Pattern[str]],
         known_commands: list[str] | None = None,
+        trace: SSHTraceSession | None = None,
     ) -> str:
         """Normalize interactive shell output and strip prompt/command echo."""
         ### Strip terminal control sequences and normalize line endings/backspaces.
@@ -522,6 +537,7 @@ class SSHService:
         prompt_patterns: list[re.Pattern[str]],
         pagination_rules: list[PaginationRule],
         known_commands: list[str] | None = None,
+        trace: SSHTraceSession | None = None,
     ) -> str:
         """Execute a single command in an interactive shell session."""
         ### Drain any stale prompt bytes before issuing the next command
@@ -532,8 +548,13 @@ class SSHService:
                 len(stale_output),
                 command,
             )
+            if trace is not None:
+                trace.received(stale_output, context=f"stale_before:{command}")
+                trace.event("STALE_OUTPUT_DISCARDED", command=command, bytes=len(stale_output))
 
         ### Send the command to the shell
+        if trace is not None:
+            trace.event("COMMAND_SEND", command=command, wait_for_prompt=wait_for_prompt)
         process.stdin.write(f"{command}\n")
 
         if not wait_for_prompt:
@@ -547,6 +568,8 @@ class SSHService:
             timeout,
             stdin=process.stdin,
             pagination_rules=pagination_rules,
+            trace=trace,
+            trace_context=f"command:{command}",
         )
 
         ### Return normalized command output
@@ -613,6 +636,8 @@ class SSHService:
         capture_output: bool,
         enable_password: str | None,
         required: bool = True,
+        trace: SSHTraceSession | None = None,
+        phase_name: str = "commands",
     ) -> list[dict[str, Any]]:
         """Run one command phase and return captured output chunks.
 
@@ -633,6 +658,9 @@ class SSHService:
             for step in commands
             if str(step.get("command") or "").strip()
         ]
+
+        if trace is not None:
+            trace.event("PHASE_START", phase=phase_name, command_count=len(commands))
 
         for command_def in commands:
             command = str(command_def.get("command") or "").strip()
@@ -657,6 +685,8 @@ class SSHService:
             if has_then:
                 try:
                     ### Some devices require a command before interactive input (e.g. 'enable')
+                    if trace is not None:
+                        trace.event("INTERACTIVE_COMMAND_SEND", phase=phase_name, command=command)
                     process.stdin.write(f"{command}\n")
                     await asyncio.sleep(0.1)
 
@@ -664,6 +694,8 @@ class SSHService:
 
                     ### Send all interactive inputs in sequence, then wait for prompt once
                     for index, input_text in enumerate(interactive_inputs, start=1):
+                        if trace is not None:
+                            trace.event("INTERACTIVE_INPUT_SEND", phase=phase_name, index=index, value="[REDACTED]")
                         if input_text.endswith(("\n", "\r")):
                             process.stdin.write(input_text)
                         else:
@@ -680,12 +712,16 @@ class SSHService:
                             default_timeout,
                             stdin=process.stdin,
                             pagination_rules=pagination_rules,
+                            trace=trace,
+                            trace_context=f"interactive:{command}",
                         )
                     else:
                         await asyncio.sleep(0.1)
                 except Exception as ex:
                     if required:
-                        raise RuntimeError("Step failed: interactive input") from ex
+                        if trace is not None:
+                            trace.event("INTERACTIVE_STEP_FAILED", phase=phase_name, command=command, error=ex)
+                        raise RuntimeError(f"Step failed: interactive input for command '{command}': {ex}") from ex
                     logger.warning("Optional interactive-input step failed: %s", ex)
                 continue
 
@@ -702,6 +738,7 @@ class SSHService:
                     prompt_patterns=prompt_patterns,
                     pagination_rules=pagination_rules,
                     known_commands=phase_commands,
+                    trace=trace,
                 )
                 if capture_output and output:
                     captured_outputs.append({
@@ -711,10 +748,14 @@ class SSHService:
                         "show_command_in_config": show_command_in_config,
                     })
             except Exception as ex:
+                if trace is not None:
+                    trace.event("COMMAND_FAILED", phase=phase_name, command=command, required=required, error_type=ex.__class__.__name__, error=ex)
                 if required:
-                    raise RuntimeError(f"Command failed: {command}") from ex
+                    raise RuntimeError(f"Command failed: {command}: {ex}") from ex
                 logger.warning("Optional command failed '%s': %s", command, ex)
 
+        if trace is not None:
+            trace.event("PHASE_END", phase=phase_name, captured_chunks=len(captured_outputs))
         return captured_outputs
 
     @staticmethod
@@ -844,6 +885,7 @@ class SSHService:
         timeout: int | None = None,
         tunnel: asyncssh.SSHClientConnection | None = None,
         connection_label: str | None = None,
+        trace: SSHTraceSession | None = None,
     ) -> asyncssh.SSHClientConnection:
         """Establish SSH connection using password and/or client key authentication."""
         ### Normalize required values early to provide clear error messages
@@ -898,6 +940,20 @@ class SSHService:
                 connect_kwargs[key] = value
 
         label = connection_label or normalized_host
+        if trace is not None:
+            trace.event(
+                "CONNECT_START",
+                label=label,
+                host=normalized_host,
+                port=int(port),
+                username=normalized_username,
+                profile=ssh_profile,
+                auth="password" if normalized_password else "key",
+                tunnel=bool(tunnel),
+                kex_algorithms=ssh_options.get("kex_algs"),
+                ciphers=ssh_options.get("encryption_algs"),
+                host_key_algorithms=ssh_options.get("server_host_key_algs"),
+            )
         logger.debug(
             "Opening SSH connection to %s (%s:%d) with profile '%s'",
             label,
@@ -905,7 +961,15 @@ class SSHService:
             int(port),
             ssh_profile,
         )
-        return await asyncssh.connect(**connect_kwargs)
+        try:
+            connection = await asyncssh.connect(**connect_kwargs)
+        except Exception as ex:
+            if trace is not None:
+                trace.event("CONNECT_FAILED", label=label, error_type=ex.__class__.__name__, error=ex)
+            raise
+        if trace is not None:
+            trace.event("CONNECT_SUCCESS", label=label)
+        return connection
 
     async def _collect_vendor_config(
         self,
@@ -913,6 +977,7 @@ class SSHService:
         vendor_id: str,
         default_timeout: int,
         enable_password: str | None,
+        trace: SSHTraceSession | None = None,
     ) -> tuple[str, str | None]:
         """Collect configuration and metadata from device via vendor-defined command phases."""
         ### Get command sets for the vendor (pre_backup, backup, post_backup)
@@ -936,6 +1001,8 @@ class SSHService:
         pre_backup_commands = command_sets.get("pre_backup", [])
         post_backup_commands = command_sets.get("post_backup", [])
 
+        if trace is not None:
+            trace.event("SHELL_OPEN", vendor=vendor_id, prompt_patterns=[p.pattern for p in prompt_patterns])
         process = await connection.create_process(term_type="vt100", encoding="utf-8")
         captured_output: list[dict[str, Any]] = []
         try:
@@ -944,14 +1011,26 @@ class SSHService:
 
             ### Wait for the initial prompt to ensure the shell is ready before sending commands
             try:
-                await self._read_until_patterns(process.stdout, prompt_patterns, default_timeout)
+                await self._read_until_patterns(
+                    process.stdout,
+                    prompt_patterns,
+                    default_timeout,
+                    trace=trace,
+                    trace_context="initial_prompt",
+                )
             except asyncio.TimeoutError:
                 logger.debug(
                     "Initial prompt wait timed out for vendor '%s'; retrying once after additional newline",
                     vendor_id,
                 )
                 process.stdin.write("\n")
-                await self._read_until_patterns(process.stdout, prompt_patterns, default_timeout)
+                await self._read_until_patterns(
+                    process.stdout,
+                    prompt_patterns,
+                    default_timeout,
+                    trace=trace,
+                    trace_context="initial_prompt_retry",
+                )
 
             ### Run commands
             ## pre_backup
@@ -963,6 +1042,8 @@ class SSHService:
                 pagination_rules=pagination_rules,
                 capture_output=False,
                 enable_password=enable_password,
+                trace=trace,
+                phase_name="pre_backup",
             )
 
             ## backup
@@ -974,6 +1055,8 @@ class SSHService:
                 pagination_rules=pagination_rules,
                 capture_output=True,
                 enable_password=None,
+                trace=trace,
+                phase_name="backup",
             )
 
             ## post_backup
@@ -986,9 +1069,13 @@ class SSHService:
                 capture_output=False,
                 enable_password=None,
                 required=False, # Set to false so backup capture can still succeed even if post_backup fails
+                trace=trace,
+                phase_name="post_backup",
             )
 
         finally:
+            if trace is not None:
+                trace.event("SHELL_CLOSE", vendor=vendor_id)
             ### Always force-close local shell handle; if already closed this isn't needed
             forced_close_wait_timeout_seconds = 1.5
             try:
@@ -1079,6 +1166,8 @@ class SSHService:
         device_config: dict[str, Any] | None = None,
     ) -> tuple[str, str | None]:
         """Get device configuration plus optional metadata via SSH or local simulator."""
+        # Refresh settings after startup/reload cache invalidation.
+        self.settings = get_settings()
         ### Get device config
         device_config = device_config or self.settings.get_device_config(device.group, device.device_name)
         enable_password_raw = str(device_config.get("enable_password") or "").strip()
@@ -1120,6 +1209,33 @@ class SSHService:
         ### Try to fetch config from device with commands defined in vendor YAML, apply retries on failure
         last_exception: Exception | None = None
         for attempt in range(1, max_attempts + 1):
+            trace: SSHTraceSession | None = None
+            trace_cfg = self.settings.app.ssh_trace
+            if trace_cfg.enabled:
+                trace = SSHTraceSession(
+                    directory=Path(trace_cfg.directory),
+                    device_name=device.device_name,
+                    attempt=attempt,
+                    secrets=[
+                        device_password,
+                        enable_password,
+                        str((jumphost_cfg or {}).get("password") or ""),
+                    ],
+                    capture_output=trace_cfg.capture_output,
+                    max_output_chars=trace_cfg.max_output_chars,
+                )
+                trace.event(
+                    "DEVICE_CONFIG",
+                    group=device.group,
+                    host=device.ip_address,
+                    port=device_port,
+                    vendor=vendor_id,
+                    profile=device_ssh_profile,
+                    protocol=protocol,
+                    timeout=timeout_seconds,
+                    jumphost=bool(jumphost_cfg),
+                )
+                logger.info("SSH trace enabled for device '%s': %s", device.device_name, trace.path)
             jump_connection: asyncssh.SSHClientConnection | None = None
             connection: asyncssh.SSHClientConnection | None = None
             try:
@@ -1150,6 +1266,7 @@ class SSHService:
                         ssh_profile=jumphost_ssh_profile,
                         timeout=timeout_seconds,
                         connection_label=f"jumphost:{jumphost_name}",
+                        trace=trace,
                     )
 
                 ### Connect via SSH using SSH profile options
@@ -1163,6 +1280,7 @@ class SSHService:
                     timeout=timeout_seconds,
                     tunnel=jump_connection,
                     connection_label=device.device_name,
+                    trace=trace,
                 )
 
                 ### Fun part: Run the configured command phases to capture device config
@@ -1171,6 +1289,7 @@ class SSHService:
                     vendor_id=vendor_id,
                     default_timeout=timeout_seconds,
                     enable_password=enable_password,
+                    trace=trace,
                 )
                 if attempt > 1:
                     logger.warning(
@@ -1179,6 +1298,8 @@ class SSHService:
                         attempt,
                         max_attempts,
                     )
+                if trace is not None:
+                    trace.close(status="success")
                 return config, metadata_output
             except asyncio.TimeoutError as ex:
                 ### Log timeout error if SSH connection times out or if waiting for command output exceeds timeout
@@ -1193,6 +1314,8 @@ class SSHService:
                     max_attempts,
                 )
                 logger.debug("Timeout details: %s", ex)
+                if trace is not None:
+                    trace.close(status="timeout", error=last_exception)
             except Exception as ex:
                 ### Log any other exceptions that occur during connection or command execution
                 ## TODO: Be more specific in exception handling. Log top 3 most common exception types?
@@ -1204,6 +1327,8 @@ class SSHService:
                     max_attempts,
                     ex,
                 )
+                if trace is not None:
+                    trace.close(status="failed", error=ex)
             finally:
                 ### Ensure connection is properly closed to avoid resource leaks, even on failure
                 if connection is not None:
