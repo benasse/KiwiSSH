@@ -821,6 +821,19 @@ class Settings(BaseSettings):
         vendors_dir = self.config_dir / "vendors"
         if vendors_dir.exists():
             for vendor_file in vendors_dir.glob("*.yaml"):
+                if not vendor_file.is_file():
+                    continue
+                with open(vendor_file, encoding="utf-8") as f:
+                    vendor_data = yaml.safe_load(f) or {}
+                    vendor_id = vendor_data["vendor"].get("id")
+                    self.vendors[vendor_id] = vendor_data
+
+        ### Load optional custom vendors after bundled vendors so matching IDs override defaults.
+        custom_vendors_dir = self.config_dir / "custom_vendors"
+        if custom_vendors_dir.exists():
+            for vendor_file in custom_vendors_dir.glob("*.yaml"):
+                if not vendor_file.is_file():
+                    continue
                 with open(vendor_file, encoding="utf-8") as f:
                     vendor_data = yaml.safe_load(f) or {}
                     vendor_id = vendor_data["vendor"].get("id")

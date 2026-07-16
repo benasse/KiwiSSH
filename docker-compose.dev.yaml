@@ -1,0 +1,16 @@
+# Development override: build KiwiSSH images from the local source tree.
+# Use together with docker-compose.yaml and docker.env.
+services:
+  backend:
+    image: kiwissh-backend:dev
+    build:
+      context: ./backend
+      dockerfile: Dockerfile_backend
+    ports:
+      - 8000:8000
+
+  frontend:
+    image: kiwissh-frontend:dev
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile_frontend

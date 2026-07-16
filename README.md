@@ -119,24 +119,81 @@ To run KiwiSSH on your local machine without Docker, follow these steps:
 
 ## Docker
 
-KiwiSSH uses separate Docker images for backend and frontend.
+The provided Docker Compose stack runs three containers:
 
-- Backend: FastAPI API service
-- Frontend: Nginx serving the built Vue app and proxying `/api/*` to backend
+- PostgreSQL for KiwiSSH application data
+- The FastAPI backend
+- The Nginx frontend, which proxies `/api/*` requests to the backend
 
-1. Update the [`docker-compose.yaml.example`](docker-compose.yaml.example) with the correct image tags for backend and frontend and set your desired environment variables (optional) and volume mounts. You can find an overview of all available environment variables [here in the README](#environment-variables) or [in the example .env file](backend/.env.example).
-2. Run the [`docker-compose.yaml.example`](docker-compose.yaml.example) file
-3. Open the UI at `http://<IP>:8123`
+Docker deployment settings are centralized in [`docker.env.example`](docker.env.example). The Compose file intentionally does not duplicate default values: required variables must be supplied through `docker.env`.
+
+1. Copy the example deployment files:
+
+   ```bash
+   cp docker-compose.yaml.example docker-compose.yaml
+   cp docker.env.example docker.env
+   ```
+
+2. Create the local configuration directories:
+
+   ```bash
+   mkdir -p local/backend/config/kiwissh_backups
+   mkdir -p local/postgres
+   ```
+
+3. Copy and edit the main KiwiSSH configuration:
+
+   ```bash
+   cp backend/config/kiwissh.yaml.example local/backend/config/kiwissh.yaml
+   ```
+
+4. Review `docker.env`, especially the PostgreSQL password, host paths, image tags, and timezone.
+
+5. Generate a secure PostgreSQL password and write the same value to both `docker.env` and `kiwissh.yaml`:
+
+   ```bash
+   POSTGRES_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64)"
+   sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${POSTGRES_PASSWORD}/" docker.env
+   sed -i "/^application_database:/,/^[^[:space:]#]/ s/^\([[:space:]]*password:[[:space:]]*\).*/\1\"${POSTGRES_PASSWORD}\"/" local/backend/config/kiwissh.yaml
+   unset POSTGRES_PASSWORD
+   ```
+
+   Run these commands before PostgreSQL is initialized for the first time. The generated password only contains alphanumeric characters, so it can be safely used in the environment file, YAML, and `sed` commands without additional escaping.
+
+6. Start the stack:
+   ```bash
+   docker compose --env-file docker.env -f docker-compose.yaml up -d
+   ```
+
+7. Open the UI at `http://<IP>:8123`.
+
+To stop the stack:
+
+```bash
+docker compose --env-file docker.env -f docker-compose.yaml down
+```
+
+To update images and restart:
+
+```bash
+docker compose --env-file docker.env -f docker-compose.yaml pull
+docker compose --env-file docker.env -f docker-compose.yaml up -d
+```
+
+> [!WARNING]
+> `docker.env` contains deployment-specific credentials and is ignored by Git. Do not commit it.
 
 > [!IMPORTANT]
-> If you're using SSH key authentication (remote git push, device backup auth, or jumphost auth), mount your SSH material into `/home/kiwissh/.ssh` and ensure permissions are correct (typically `600` for private keys/config/known_hosts, owned by `kiwissh` uid:gid 1000:1000).
+> `KIWISSH_BACKUPS_DIR` must point to persistent host storage. Backups stored only inside the backend container are lost when the container is recreated. PostgreSQL data is persisted separately through `POSTGRES_DATA_DIR`.
+
+> [!IMPORTANT]
+> If you use SSH key authentication for remote Git pushes, device backups, or jump hosts, uncomment the `KIWISSH_SSH_MATERIAL_DIR` volume in `docker-compose.yaml`. Ensure the mounted files have suitable permissions (typically `600` for private keys, config, and `known_hosts`) and are owned by uid:gid `1000:1000`.
 
 > [!NOTE]
 > - API calls are available through the frontend proxy: `http://<IP>:8123/api/v1/...`
 > - The backend image includes default `ssh_profiles.yaml` and `vendors/*.yaml` directly in `/config`
 > - The backend always reads configuration from `/config`
-> - You still need a valid `kiwissh.yaml` in `/config` and should persist `backups/` on a host volume
-
+> - Optional device, vendor, SSH profile, and SSH material mounts are documented in `docker.env.example` and commented out in `docker-compose.yaml.example`
 # Configuration
 
 KiwiSSH can be configured using a combination of environment variables and a [YAML configuration file](backend/config/kiwissh.yaml.example). The YAML file contains the main configuration settings, while environment variables are used to define global, application-unspecific values for different deployments.

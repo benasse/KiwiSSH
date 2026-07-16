@@ -8,7 +8,7 @@ Thanks for your potential interest in contributing to KiwiSSH! There are several
 - [Development](#development)
   - [Setup Development Environment](#setup-development-environment)
     - [Local](#local)
-    - [Build Docker image yourself](#build-docker-image-yourself)
+    - [Build Docker images locally](#build-docker-images-locally)
   - [Swagger API Documentation](#swagger-api-documentation)
 - [Commits](#commits)
 
@@ -48,18 +48,40 @@ To run KiwiSSH on your local machine without Docker, follow these steps:
 5. Navigate to the frontend directory and install the dependencies with `npm install`
 6. Start the frontend with `npm run dev`
 
-#### Build Docker image yourself
+#### Build Docker images locally
 
-1. Make sure you're in the root of the repository
-2. Build the backend image: `docker build -f .\backend\Dockerfile_backend --platform linux/amd64,linux/arm64 -t casudo/kiwissh-backend:<YOUR_TAG> .\backend`
-3. Build the frontend image: `docker build -f .\frontend\Dockerfile_frontend --platform linux/amd64,linux/arm64 -t casudo/kiwissh-frontend:<YOUR_TAG> .\frontend`
+Prepare the Docker deployment files and configuration as described in the [Docker installation guide](README.md#docker), then use the development override to build the backend and frontend images from the local source tree:
+
+```bash
+docker compose \
+  --env-file docker.env \
+  -f docker-compose.yaml \
+  -f docker-compose.dev.yaml \
+  up -d --build
+```
+
+This builds:
+
+- `kiwissh-backend:dev` from `backend/Dockerfile_backend`
+- `kiwissh-frontend:dev` from `frontend/Dockerfile_frontend`
+
+The frontend is available on port `8123`. The development override also exposes the backend API and Swagger UI at `http://<IP>:8000/docs`.
+
+Rebuild after source changes with the same command. To force a clean rebuild:
+
+```bash
+docker compose \
+  --env-file docker.env \
+  -f docker-compose.yaml \
+  -f docker-compose.dev.yaml \
+  build --no-cache backend frontend
+```
 
 > [!TIP]
-> The `.dockerignore` file is always resolved from the build context root:
+> The `.dockerignore` file is resolved from each build context root:
 >
-> - backend build uses `backend/.dockerignore`
-> - frontend build uses `frontend/.dockerignore`
-
+> - Backend: `backend/.dockerignore`
+> - Frontend: `frontend/.dockerignore`
 ### Swagger API Documentation
 
 The API documentation is available at `http://<IP>:8000/docs` when the backend is running. You can use this interface to explore and test the API endpoints.

@@ -1,38 +1,64 @@
 networks:
-  your-network:
-    external: true
+  kiwi-network:
+    driver: bridge
+
 
 services:
+  postgres:
+    container_name: kiwissh_postgres
+    image: postgres:${POSTGRES_IMAGE_TAG:?Set POSTGRES_IMAGE_TAG in docker.env}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?Set TZ in docker.env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in docker.env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in docker.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker.env}
+    volumes:
+      - ${POSTGRES_DATA_DIR:?Set POSTGRES_DATA_DIR in docker.env}:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    hostname: postgres
+    networks:
+      - kiwi-network
+
   backend:
     container_name: kiwissh_backend
-    image: ghcr.io/casudo/kiwissh-backend:<tag>
+    image: ghcr.io/casudo/kiwissh-backend:${KIWISSH_BACKEND_IMAGE_TAG:?Set KIWISSH_BACKEND_IMAGE_TAG in docker.env}
     restart: unless-stopped
     ### Uncomment ports if you want to access the API docs via http://<IP>:8000/docs
     # ports:
     #   - 8000:8000
     volumes:
-      ### Required: Mount the kiwissh.yaml into the container
-      - /PATH_TO_CONFIG/kiwissh.yaml:/config/kiwissh.yaml
-      ### Required: Mount internal "git.local_path" to a volume or bind mount
-      ## CRITICAL: IF YOU DO NOT MOUNT THIS FOLDER, ALL LOCAL BACKUPS ARE DELETED ON CONTAINER RESTART!
-      - /PATH_TO_BACKUPS/kiwissh_backups/:/config/backups/
-      ### Optional: Mount source file if used
-      # - /PATH_TO_CONFIG/devices.csv:/config/sources/devices.csv
-      ### Optional: Mount your own custom vendor files or ssh_profiles to the /config folder
-      # - /PATH_TO_CONFIG/config/vendors/customer_aaa_ciscoios.yaml:/config/vendors/customer_aaa_ciscoios.yaml
-      # - /PATH_TO_CONFIG/config/ssh_profiles.yaml:/config/ssh_profiles.yaml
+      - ${KIWISSH_CONFIG_FILE:?Set KIWISSH_CONFIG_FILE in docker.env}:/config/kiwissh.yaml
+      - ${KIWISSH_BACKUPS_DIR:?Set KIWISSH_BACKUPS_DIR in docker.env}:/config/backups/
+      - ${KIWISSH_SSH_TRACE_DIR:?Set KIWISSH_SSH_TRACE_DIR in docker.env}:/config/debug
+      ### Optional: Mount the source directory if a file-based source is used.
+      # Mounting the directory allows device reloads to detect files replaced atomically by editors.
+      # - ${KIWISSH_SOURCES_DIR:?Set KIWISSH_SOURCES_DIR in docker.env}:/config/sources
+      ### Optional: Mount your custom vendor definitions directory
+      # - ${KIWISSH_VENDORS_DIR:?Set KIWISSH_VENDORS_DIR in docker.env}:/config/custom_vendors
+      # - ${KIWISSH_SSH_PROFILES_FILE:?Set KIWISSH_SSH_PROFILES_FILE in docker.env}:/config/ssh_profiles.yaml
       ### Optional: mount SSH material for remote git pushes or device login (needs to be uid:gid 1000:1000)
-      # - /PATH_TO_CONFIG/ssh_material:/home/kiwissh/.ssh
+      # - ${KIWISSH_SSH_MATERIAL_DIR:?Set KIWISSH_SSH_MATERIAL_DIR in docker.env}:/home/kiwissh/.ssh
     environment:
-      - TZ=Europe/Berlin
+      TZ: ${TZ:?Set TZ in docker.env}
+      KIWISSH_LOCAL_TEST_MODE: ${KIWISSH_LOCAL_TEST_MODE:?Set KIWISSH_LOCAL_TEST_MODE in docker.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
     hostname: kiwissh_backend
     networks:
-      - your-network
+      - kiwi-network
 
   frontend:
     container_name: kiwissh_frontend
-    image: ghcr.io/casudo/kiwissh-frontend:<tag>
+    image: ghcr.io/casudo/kiwissh-frontend:${KIWISSH_FRONTEND_IMAGE_TAG:?Set KIWISSH_FRONTEND_IMAGE_TAG in docker.env}
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:?Set TZ in docker.env}
     ports:
       - 8123:8080
     # labels:
@@ -46,4 +72,4 @@ services:
       - backend
     hostname: kiwissh_frontend
     networks:
-      - your-network
+      - kiwi-network

@@ -18,12 +18,14 @@ app:
 ### Application database (PostgreSQL only)
 ## This database stores KiwiSSH-owned data (backup job logs, favorites, etc.)
 ## The database itself and the user must already exist, the required tables will be created automatically.
+## Docker Compose: use postgres, the service name defined in docker-compose.yaml.
+## External PostgreSQL example: replace the host with an IP address, e.g. 192.168.15.25.
 application_database:
-  host: "192.168.15.25"
+  host: "postgres"
   port: 5432
   database: "kiwissh"
   username: "kiwissh_user"
-  password: "kiwissh-user-password"
+  password: "change-me"
 
 ### Notification settings (optional, disabled by default)
 ## Read about the configuration options in the README.md
@@ -42,15 +44,15 @@ notifications:
 ## Required fields per device: group, device_name, ip_address, enabled
 ## Paths may be absolute, or relative to the config directory.
 sources:
-  # file: "/config/sources/devices.csv"
+  file: "/config/sources/devices.csv"
   # ansible: "/config/sources/inventory.yaml"
-  postgres:
-      host: "172.16.147.56"
-      port: 5432
-      database: "existing_inventory_db"
-      table: "prod_devices"
-      username: "kiwissh"
-      password: "strongpassword"
+  # postgres:
+  #     host: "172.16.147.56"
+  #     port: 5432
+  #     database: "existing_inventory_db"
+  #     table: "prod_devices"
+  #     username: "kiwissh"
+  #     password: "strongpassword"
   # http:
   #     url: "http://10.11.12.13/api/devices"
   #     headers:
@@ -83,10 +85,11 @@ groups:
     git:
       remote:
         url: "ssh://git@gitea/customer-aaa/switches.git"
-    jumphost:
-      username: "jumphost-user"
-      hostname: "my.jumphost.com"
-      ssh_profile: "legacy-jumphost"
+    # jumphost:
+    #   username: "jumphost-user"
+    #   hostname: "my.jumphost.com"
+    #   password: "jumphost-password" # Or use ssh_key_file
+    #   ssh_profile: "legacy-jumphost"
   
   <another-group-name>:
     username: "admin"
