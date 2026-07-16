@@ -297,7 +297,36 @@ Configure where KiwiSSH load the devices to backup from. You can choose between 
 | --- | ----------- | -------- | ------------- |
 | `sources.file` | Path to the CSV file containing the device entries. Absolute, or relative to the config directory. | **Yes** | - |
 
-The devices will be loaded from the specified CSV file. The headers must be separated by commas like this:
+The CSV requires the following columns:
+
+- `group`
+- `device_name`
+- `ip_address`
+- `enabled`
+
+It can also provide optional per-device connection settings:
+
+- `username`
+- `password`
+- `enable_password`
+- `ssh_key_file`
+- `ssh_profile`
+- `vendor`
+- `protocol`
+- `port`
+- `timeout`
+- `retry`
+
+CSV values override group defaults. Explicit entries under `nodes` in `kiwissh.yaml` have the highest priority:
+
+```text
+application defaults < group defaults < CSV values < nodes overrides
+```
+
+Nested settings such as `jumphost` cannot be represented directly in CSV. Define them in the matching group or node in `kiwissh.yaml`, or use the native YAML source.
+
+> [!WARNING]
+> A CSV source may contain plaintext credentials. Restrict file permissions and do not commit deployment credentials.
 
 [See an example CSV file here](backend/config/sources/devices.csv.example).
 
@@ -417,14 +446,14 @@ KiwiSSH will always store the device configurations in local git repositories to
 
 | Key | Description | Required | Default Value |
 | --- | ----------- | -------- | ------------- |
-| `groups.<group>.username` | The username for SSH authentication for devices in this group. | **Yes** | - |
+| `groups.<group>.username` | Default username for devices in this group. May be supplied by the device source or a node override. | No | - |
 | `groups.<group>.password` | The password for SSH authentication for devices in this group (optional when `ssh_key_file` is used). | No | - |
 | `groups.<group>.enable_password` | Optional enable password for devices in this group. Vendor YAML `then` values can reference it with `{{ enable_password }}`. | No | - |
 | `groups.<group>.ssh_key_file` | The private key file path for SSH authentication for devices in this group (alternative to password). | No | - |
-| `groups.<group>.ssh_profile` | The SSH profile to use for devices in this group. This is used to determine the SSH options to use when connecting to the devices. | **Yes** | - |
+| `groups.<group>.ssh_profile` | Default SSH profile for devices in this group. May be supplied by the device source or a node override. | No | - |
 | `groups.<group>.protocol` | Protocol to use for devices in this group (`ssh` or `telnet`). | No | Global `app.protocol` |
 | `groups.<group>.port` | Protocol port for devices in this group. | No | `22` (or `23` when `protocol: telnet`) |
-| `groups.<group>.vendor` | The vendor of the devices in this group. This is used to determine the CLI commands to run for fetching the configuration. | **Yes** | - |
+| `groups.<group>.vendor` | Default vendor for devices in this group. May be supplied by the device source or a node override. | No | - |
 | `groups.<group>.jumphost.hostname` | Jumphost hostname or IP for this group. If set, devices in this group are reached through this jumphost. | **Yes**, if `jumphost` | - |
 | `groups.<group>.jumphost.port` | Jumphost SSH port. | No | `22` |
 | `groups.<group>.jumphost.username` | Jumphost SSH username. | **Yes**, if `jumphost` | - |
