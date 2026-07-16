@@ -28,6 +28,7 @@ commands:
   pre_backup:
     - command: "enable"
       then: ["{{ enable_password }}"]
+      when: "enable_password"
     - command: "terminal datadump"
     - command: "terminal length 0"
     - command: "terminal width 0"

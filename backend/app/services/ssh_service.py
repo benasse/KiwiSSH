@@ -644,6 +644,7 @@ class SSHService:
         Supported step modes:
         - command: send `command` and optionally skip wait for prompt
         - command + then: send `command`, then send up to five interactive inputs and optionally skip wait for prompt
+        - when: enable_password: skip the step when the device has no enable password
 
         A chunk contains:
         - command: command string
@@ -665,10 +666,25 @@ class SSHService:
         for command_def in commands:
             command = str(command_def.get("command") or "").strip()
             has_then = "then" in command_def
+            condition = str(command_def.get("when") or "").strip()
 
             metadata = bool(command_def.get("metadata", False))
             wait_for_prompt = bool(command_def.get("wait_for_prompt", True))
             show_command_in_config = bool(command_def.get("show_command_in_config", False))
+
+            if condition == "enable_password" and not enable_password:
+                if trace is not None:
+                    trace.event(
+                        "COMMAND_SKIPPED",
+                        phase=phase_name,
+                        command=command,
+                        reason="enable_password_not_defined",
+                    )
+                continue
+            if condition and condition != "enable_password":
+                raise RuntimeError(
+                    f"Invalid command condition '{condition}': supported value is 'enable_password'"
+                )
 
             if metadata and show_command_in_config:
                 raise RuntimeError(

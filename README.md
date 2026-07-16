@@ -236,7 +236,6 @@ Full available options:
 | `app.retry` | The global retry count, which defines how many additional attempts should be made after the first failed attempt. This can also be overridden for specific groups or nodes. | No | `3` |
 | `app.ssh_trace.enabled` | Write a redacted diagnostic file for each SSH attempt. | No | `false` |
 | `app.ssh_trace.directory` | Directory where SSH trace files are written. | No | `/config/debug` |
-| `app.ssh_trace.capture_output` | Include received terminal output in traces. This can contain device configuration data. Known credentials are redacted. | No | `false` |
 | `app.ssh_trace.max_output_chars` | Maximum received output characters stored per trace event. | No | `4000` |
 | `app.protocol` | Default protocol for device connections (`ssh` or `telnet`). | No | `ssh` |
 | `app.api.host` | The host on which the API server will run. Should be set to 0.0.0.0 when running in Docker. | No | `127.0.0.1` |
@@ -258,7 +257,6 @@ app:
   ssh_trace:
     enabled: true
     directory: "/config/debug"
-    capture_output: true
     max_output_chars: 4000
 ```
 
@@ -271,7 +269,7 @@ Each attempt creates a file such as:
 Trace files record connection parameters, selected SSH algorithms, connection outcome, prompt detection, command phases, interactive steps, timeouts, and errors. Passwords and enable passwords known to KiwiSSH are replaced with `[REDACTED]`.
 
 > [!WARNING]
-> With `capture_output: true`, trace files may contain device configuration output or other sensitive terminal text which KiwiSSH cannot identify as a credential. Enable it only while troubleshooting, protect the trace directory, and delete traces afterwards.
+> When SSH tracing is enabled, trace files may contain device configuration output or other sensitive terminal text which KiwiSSH cannot identify as a credential. Enable it only while troubleshooting, protect the trace directory, and delete traces afterwards.
 
 For Docker deployments, `KIWISSH_SSH_TRACE_DIR` mounts the host trace directory at `/config/debug`.
 
@@ -604,6 +602,7 @@ commands:
     - command: "another command here" # another simple command
     - command: "enable" # interactive command
       then: ["{{ enable_password }}"]
+      when: "enable_password" # skip this step when the device has no enable password
     - command: "logout" # another interactive command
       then:
         - "y"
@@ -616,6 +615,7 @@ You can use the following keys for each command step:
 | --- | ----------- | -------- | ------------- |
 | `command` | Directly run the command on the device. | **Yes** | - |
 | `then` | Optional interactive input sequence to send after `command`. Must be a YAML list (`then: ["value1", "value2", ...]`) with up to 5 entries. Empty strings are sent as Enter. String values may use `{{ enable_password }}` to inject the device enable password. | No | - |
+| `when` | Optional condition controlling whether the step runs. Use `enable_password` to run the step only when an enable password is configured for the device. | No | - |
 | `description` | A brief description of the command. | No | - |
 | `metadata` | If set to true, the output of this command will be saved as comment-prefixed metadata block in the backup job log. This is useful for adding important information to the backup job log. | No | `false` |
 | `wait_for_prompt` | If set to false, KiwiSSH will not wait for the command prompt to return after running this command before proceeding to the next step. Use with caution. | No | `true` |
