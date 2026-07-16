@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ### Load .env file early to ensure environment variables are available
@@ -342,15 +342,15 @@ class NodeJumphostConfig(JumphostBaseConfig):
 
 
 class GroupConfig(BaseModel):
-    """Device group configuration."""
-    username: str
+    """Device group defaults. Connection fields may be supplied by a device source."""
+    username: str | None = None
     password: str | None = None
     enable_password: str | None = None
     ssh_key_file: str | None = None
     ssh_profile: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)
     protocol: str | None = None
-    vendor: str
+    vendor: str | None = None
     jumphost: GroupJumphostConfig | None = None
     timeout: int | None = Field(default=None, ge=1)
     retry: int | None = Field(default=None, ge=0)
@@ -359,12 +359,12 @@ class GroupConfig(BaseModel):
 
     @field_validator("username", mode="before")
     @classmethod
-    def validate_group_username(cls, value: str | None) -> str:
-        """Require a non-empty SSH username per group."""
-        text = "" if value is None else str(value).strip()
-        if not text:
-            raise ValueError("username is required and must be a non-empty string")
-        return text
+    def normalize_group_username(cls, value: str | None) -> str | None:
+        """Normalize an optional group username."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @field_validator("ssh_key_file", mode="before")
     @classmethod
@@ -388,14 +388,12 @@ class GroupConfig(BaseModel):
 
     @field_validator("vendor", mode="before")
     @classmethod
-    def validate_vendor(cls, vendor: str) -> str:
-        """Require a non-empty vendor id per group."""
+    def normalize_group_vendor(cls, vendor: str | None) -> str | None:
+        """Normalize an optional group vendor id."""
         if vendor is None:
-            raise ValueError("Vendor is required")
+            return None
         text = str(vendor).strip()
-        if not text:
-            raise ValueError("Vendor must be a non-empty string")
-        return text
+        return text or None
 
     @field_validator("protocol", mode="before")
     @classmethod
@@ -403,14 +401,7 @@ class GroupConfig(BaseModel):
         """Normalize optional protocol override."""
         return _normalize_protocol(value, allow_none=True)
 
-    @model_validator(mode="after")
-    def validate_group_protocol(self) -> "GroupConfig":
-        """Require ssh_profile unless protocol is explicitly telnet."""
-        if self.protocol == "telnet":
-            return self
-        if not self.ssh_profile:
-            raise ValueError("ssh_profile is required for SSH protocol")
-        return self
+
     
     @field_validator("password", mode="before")
     @classmethod
@@ -743,6 +734,7 @@ class Settings(BaseSettings):
 
     ### Database URL (computed from application_database config)
     database_url: str = ""
+    _source_device_configs: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
 
     @model_validator(mode="after")
@@ -796,7 +788,6 @@ class Settings(BaseSettings):
             ## Resolve a relative sources.file path against the configuration directory
             if self.sources.file:
                 self.sources.file = self._resolve_config_relative_path(self.sources.file)
-
             ### git
             self.git = GitConfig(**file_content.get("git", {}))
             ## Resolve a relative git.local_path against the configuration directory
@@ -907,9 +898,18 @@ class Settings(BaseSettings):
             password=self.sources.postgres.password,
         )
 
+    def clear_source_device_configs(self) -> None:
+        """Clear source-provided overrides before reloading the inventory."""
+        self._source_device_configs.clear()
+
+    def register_source_device_config(self, device_name: str, config: dict[str, Any]) -> None:
+        """Register source-provided overrides without exposing credentials through API models."""
+        validated = NodeConfig(**config)
+        self._source_device_configs[device_name] = validated.model_dump(exclude_none=True)
+
     def get_device_config(self, group: str, device_name: str) -> dict[str, Any]:
         """
-        Resolve device configuration with priority: App defaults < Group defaults < Node-specific
+        Resolve device configuration with priority: App defaults < Group defaults < Source overrides < Node-specific
 
         Group cannot be overridden - it must be changed in the source.
         Returns a dict with resolved ssh_profile, vendor, and other settings.
@@ -961,7 +961,15 @@ class Settings(BaseSettings):
             if group_config.protocol is not None:
                 device_config["protocol"] = group_config.protocol
 
-        ### Step 2: Apply node-specific overrides
+        ### Step 2: Apply source-provided overrides
+        source_config = self._source_device_configs.get(device_name, {})
+        for key, value in source_config.items():
+            if value is not None:
+                device_config[key] = value
+                if key == "port":
+                    port_is_default = False
+
+        ### Step 3: Apply node-specific overrides
         ### NOTE: Group cannot be overridden here - must be changed in source
         if device_name in self.nodes:
             node_config = self.nodes[device_name]
@@ -1016,6 +1024,15 @@ class Settings(BaseSettings):
 
         if resolved_protocol == "telnet" and port_is_default:
             device_config["port"] = 23
+
+        resolved_username = str(device_config.get("username") or "").strip()
+        resolved_vendor = str(device_config.get("vendor") or "").strip()
+        if not resolved_username:
+            raise ValueError(f"Device '{device_name}' in group '{group}' requires username")
+        if not resolved_vendor:
+            raise ValueError(f"Device '{device_name}' in group '{group}' requires vendor")
+        device_config["username"] = resolved_username
+        device_config["vendor"] = resolved_vendor
 
         resolved_password = str(device_config.get("password") or "").strip()
         resolved_key_file = str(device_config.get("ssh_key_file") or "").strip()

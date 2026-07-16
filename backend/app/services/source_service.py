@@ -38,6 +38,14 @@ class SourceService:
                 f"Available groups: {', '.join(self.settings.groups.keys())}"
             )
 
+        override_fields = {
+            "username", "password", "enable_password", "ssh_key_file", "ssh_profile",
+            "vendor", "protocol", "port", "timeout", "retry", "jumphost",
+        }
+        source_overrides = {key: row[key] for key in override_fields if row.get(key) is not None}
+        if source_overrides:
+            self.settings.register_source_device_config(device_name, source_overrides)
+
         device_config = self.settings.get_device_config(group, device_name)
 
         resolved_ssh_profile = str(device_config.get("ssh_profile") or "").strip()
@@ -403,6 +411,7 @@ class SourceService:
     def invalidate_cache(self) -> None:
         """Clear the device cache to force reload."""
         self.settings = get_settings()
+        self.settings.clear_source_device_configs()
         self._devices_cache.clear()
         self._loaded = False
 
