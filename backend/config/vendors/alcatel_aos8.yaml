@@ -1,0 +1,38 @@
+### Alcatel-Lucent Vendor Configuration
+## Instructions for backing up Alcatel-Lucent AOS 8 devices
+
+vendor:
+  id: "alcatel_aos8"
+  name: "Alcatel-Lucent AOS8"
+  description: "Used in OmniSwitch devices running AOS 8"
+
+### AOS 8 can display a prompt without a trailing "#" or ">".
+session:
+  comment_prefix: "! "
+  prompt: '^([\w.@-]+(?: ?[#>])?\s?)$'
+
+### Commands to execute for backup
+commands:
+  ### Informational outputs are stored as metadata.
+  backup:
+    - command: "show system"
+      metadata: true
+    - command: "show chassis"
+      metadata: true
+    - command: "show hardware info"
+      metadata: true
+    - command: "show license info"
+      metadata: true
+    - command: "show license file"
+      metadata: true
+    - command: "show configuration snapshot"
+      show_command_in_config: true
+
+  ### Close the SSH or Telnet session after the backup.
+  post_backup:
+    - command: "exit"
+
+### Configuration processing rules
+processing:
+  redaction:
+    enabled: false

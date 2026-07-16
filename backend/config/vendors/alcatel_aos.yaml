@@ -9,6 +9,7 @@ vendor:
 ### Session-level output behavior.
 session:
   comment_prefix: "! "
+  prompt: '^([\w.@-]+ ?[#>]\s?)$'
 
 ### Commands to execute for backup
 ## Supported step types in command phases:
@@ -18,6 +19,8 @@ commands:
   ### Main backup command(s)
   ## Commands whose output becomes the stored configuration
   backup:
+    - command: "show system"
+      metadata: true
     - command: "show chassis"
       metadata: true
     - command: "show hardware info"
