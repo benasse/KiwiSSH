@@ -81,6 +81,34 @@ git:
 ## Priority for device configuration (default to most specific): app < groups < nodes
 ## KiwiSSH closes shell sessions automatically after backup command phases, you don't need to explicitly add "exit" or "logout" but you can.
 groups:
+  # Complete group example (uncomment and rename it to use it):
+  # complex-group:
+  #   username: "network-admin"
+  #   password: "device-password" # Optional when ssh_key_file is used
+  #   enable_password: "enable-password" # Enable mode is attempted only when this is defined
+  #   ssh_key_file: "/home/kiwissh/.ssh/id_ed25519"
+  #   ssh_profile: "modern"
+  #   protocol: "ssh"
+  #   port: 22
+  #   vendor: "cisco_ios"
+  #   timeout: 60
+  #   retry: 3
+  #   jumphost:
+  #     hostname: "bastion.example.com"
+  #     port: 22
+  #     username: "customer@tenant"
+  #     password: "jumphost-password" # Optional when ssh_key_file is used
+  #     ssh_key_file: "/home/kiwissh/.ssh/id_ed25519"
+  #     ssh_profile: "modern"
+  #   schedule:
+  #     cron: "0 */6 * * *"
+  #     timezone: "Europe/Paris"
+  #   git:
+  #     commit_message_template: "Backup {device_name} at {timestamp}"
+  #     remote:
+  #       url: "ssh://git@git.example.com/network/{group}.git"
+  #       branch: "main"
+
   <your-group-name-here>:
     username: "admin"
     password: "password"
