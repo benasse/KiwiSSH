@@ -275,6 +275,21 @@ Trace files record connection parameters, selected SSH algorithms, connection ou
 
 For Docker deployments, `KIWISSH_SSH_TRACE_DIR` mounts the host trace directory at `/config/debug`.
 
+For example, define the host directory in `docker.env`:
+
+```env
+KIWISSH_SSH_TRACE_DIR=./local/backend/debug
+```
+
+Then mount it in `docker-compose.yaml`:
+
+```yaml
+services:
+  backend:
+    volumes:
+      - ${KIWISSH_SSH_TRACE_DIR:?Set KIWISSH_SSH_TRACE_DIR in docker.env}:/config/debug
+```
+
 ### application_database
 
 The `application_database` segment is used to configure the connection to the PostgreSQL database where KiwiSSH will store its application data (e.g. backup job logs, favorite devices, etc.). This database is required for KiwiSSH to function properly.
