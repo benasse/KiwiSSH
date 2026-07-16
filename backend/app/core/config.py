@@ -142,7 +142,6 @@ class SSHTraceConfig(BaseModel):
 
     enabled: bool = False
     directory: str = "/config/debug"
-    capture_output: bool = False
     max_output_chars: int = Field(default=4000, ge=256, le=100000)
 
     @field_validator("directory", mode="before")

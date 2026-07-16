@@ -43,7 +43,7 @@ READ_CHUNK_SIZE = 4096
 READ_POLL_INTERVAL_SECONDS = 1.0
 LARGE_OUTPUT_TIMEOUT_THRESHOLD_BYTES = 256 * 1024
 LARGE_OUTPUT_INACTIVITY_TIMEOUT_SECONDS = 90
-PROMPT_CONFIRM_IDLE_SECONDS = 0.2
+PROMPT_CONFIRM_IDLE_SECONDS = 0.75
 PROMPT_CONFIRM_MAX_SECONDS = 2.0
 
 PaginationRule = tuple[re.Pattern[str], str]
@@ -350,6 +350,11 @@ class SSHService:
                     if trace is not None:
                         trace.event("PAGINATION_MATCHED", context=trace_context, line=tail_lines[-1])
                     if stdin is not None:
+                        if trace is not None:
+                            trace.raw_sent(
+                                matched_pagination_response,
+                                context=f"pagination:{trace_context}",
+                            )
                         stdin.write(matched_pagination_response)
 
                     ### After sending pagination continuation, wait another full timeout window
@@ -401,6 +406,8 @@ class SSHService:
                 return buffer
 
             ### Append the new chunk to the buffer and continue checking for patterns
+            if trace is not None:
+                trace.raw_received(chunk, context=trace_context)
             buffer += chunk
 
             ### Large outputs on slower devices can pause for longer between chunks
@@ -612,6 +619,7 @@ class SSHService:
         ### Send the command to the shell
         if trace is not None:
             trace.event("COMMAND_SEND", command=command, wait_for_prompt=wait_for_prompt)
+            trace.raw_sent(f"{command}\n", context=f"command:{command}")
         process.stdin.write(f"{command}\n")
 
         if not wait_for_prompt:
@@ -760,6 +768,10 @@ class SSHService:
                     ### Some devices require a command before interactive input (e.g. 'enable')
                     if trace is not None:
                         trace.event("INTERACTIVE_COMMAND_SEND", phase=phase_name, command=command)
+                        trace.raw_sent(
+                            f"{command}\n",
+                            context=f"interactive_command:{command}",
+                        )
                     process.stdin.write(f"{command}\n")
                     await asyncio.sleep(0.1)
 
@@ -769,6 +781,11 @@ class SSHService:
                     for index, input_text in enumerate(interactive_inputs, start=1):
                         if trace is not None:
                             trace.event("INTERACTIVE_INPUT_SEND", phase=phase_name, index=index, value="[REDACTED]")
+                            trace.raw_sent(
+                                input_text if input_text.endswith(("\n", "\r")) else f"{input_text}\n",
+                                context=f"interactive_input:{command}:{index}",
+                                secret=True,
+                            )
                         if input_text.endswith(("\n", "\r")):
                             process.stdin.write(input_text)
                         else:
@@ -1113,6 +1130,8 @@ class SSHService:
                     "Initial prompt wait timed out for vendor '%s'; retrying once after additional newline",
                     vendor_id,
                 )
+                if trace is not None:
+                    trace.raw_sent("\n", context="initial_prompt_retry")
                 process.stdin.write("\n")
                 await self._read_until_patterns(
                     process.stdout,
@@ -1311,7 +1330,6 @@ class SSHService:
                         enable_password,
                         str((jumphost_cfg or {}).get("password") or ""),
                     ],
-                    capture_output=trace_cfg.capture_output,
                     max_output_chars=trace_cfg.max_output_chars,
                 )
                 trace.event(

@@ -21,7 +21,6 @@ class SSHTraceSession:
         device_name: str,
         attempt: int,
         secrets: list[str | None],
-        capture_output: bool,
         max_output_chars: int,
     ) -> None:
         self._write_failed = False
@@ -32,7 +31,6 @@ class SSHTraceSession:
         safe_device = _SAFE_NAME_RE.sub("_", device_name).strip("._") or "device"
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
         self.path = directory / f"{safe_device}-{timestamp}-attempt{attempt}.log"
-        self.capture_output = capture_output
         self.max_output_chars = max(256, max_output_chars)
         self._secrets = sorted(
             {str(value) for value in secrets if value is not None and str(value)},
@@ -66,8 +64,8 @@ class SSHTraceSession:
             self._write_failed = True
 
     def received(self, output: str, *, context: str) -> None:
-        """Record terminal output when explicitly enabled, with redaction and size limits."""
-        if not self.capture_output or not output:
+        """Record normalized terminal output with redaction and size limits."""
+        if not output:
             return
         normalized = _ANSI_ESCAPE_RE.sub("", output).replace("\r\n", "\n").replace("\r", "\n")
         redacted = self._redact(normalized)
@@ -75,6 +73,21 @@ class SSHTraceSession:
             redacted = redacted[-self.max_output_chars :]
             redacted = f"[TRUNCATED TO LAST {self.max_output_chars} CHARACTERS]\n{redacted}"
         self.event("RECEIVED", context=context, output=redacted)
+
+    def raw_received(self, output: str, *, context: str) -> None:
+        """Record one received stream chunk with control characters escaped."""
+        if not output:
+            return
+        redacted = self._redact(output)
+        if len(redacted) > self.max_output_chars:
+            redacted = redacted[: self.max_output_chars]
+            redacted = f"{redacted}[TRUNCATED AFTER {self.max_output_chars} CHARACTERS]"
+        self.event("RAW_RECV", context=context, data=ascii(redacted))
+
+    def raw_sent(self, output: str, *, context: str, secret: bool = False) -> None:
+        """Record one stream write with control characters escaped."""
+        rendered = "[REDACTED]" if secret else self._redact(output)
+        self.event("RAW_SEND", context=context, data=ascii(rendered))
 
     def close(self, *, status: str, error: object | None = None) -> None:
         """Finish the trace with an outcome marker."""

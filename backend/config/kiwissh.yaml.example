@@ -13,7 +13,6 @@ app:
   ssh_trace:
     enabled: false
     directory: "/config/debug"
-    capture_output: false # May contain device configuration; known credentials are redacted
     max_output_chars: 4000
   schedule:
     cron: "0 2 * * *" # Daily at 2 AM
