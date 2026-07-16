@@ -285,16 +285,24 @@ function getLineClass(type: string): string {
       </span>
     </div>
 
-    <div v-if="isLargeDiff" class="flex flex-wrap items-center gap-3 text-sm">
-      <p class="text-orange-600 dark:text-orange-400">
-        Large diff detected ({{ diffLineCount }} lines).
-        <span v-if="!showFullDiff">Showing first {{ MAX_DIFF_LINES }} lines.</span>
+    <div
+      v-if="isLargeDiff"
+      class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/30"
+    >
+      <p class="text-amber-800 dark:text-amber-200">
+        Full diff: <strong>{{ diffLineCount }} lines</strong>.
+        <span v-if="!showFullDiff">
+          Preview limited to the first {{ MAX_DIFF_LINES }} lines.
+        </span>
+        <span v-else>
+          All lines are displayed.
+        </span>
       </p>
       <button
         @click="showFullDiff = !showFullDiff"
-        class="btn btn-secondary py-1 px-3 text-sm"
+        class="btn btn-secondary shrink-0 px-3 py-1 text-sm"
       >
-        {{ showFullDiff ? "Hide full diff" : "Show full diff" }}
+        {{ showFullDiff ? `Limit to ${MAX_DIFF_LINES} lines` : `Show all ${diffLineCount} lines` }}
       </button>
     </div>
 
